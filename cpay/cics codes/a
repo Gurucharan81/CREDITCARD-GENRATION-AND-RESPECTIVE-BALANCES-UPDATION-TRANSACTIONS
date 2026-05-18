@@ -1,0 +1,183 @@
+       IDENTIFICATION DIVISION.                                         00010000
+       PROGRAM-ID. PINSETUP.                                            00020000
+       DATA DIVISION.                                                   00030000
+       WORKING-STORAGE SECTION.                                         00040000
+       COPY DFHAID.                                                     00050000
+       COPY MSPI.                                                       00060000
+                                                                        00070000
+       01 WS-AID        PIC X.                                          00080000
+       01 WS-DATE       PIC X(10).                                      00090000
+       01 WS-ABSTIME    PIC S9(15) COMP-3.                              00100000
+                                                                        00110000
+       01 WS-PIN        PIC 9(4).                                       00120000
+       01 WS-CONPIN     PIC 9(4).                                       00130000
+                                                                        00140000
+       01 WS-ACCNO      PIC 9(5).                                       00150000
+       01 WS-COMM-LEN   PIC S9(4) COMP VALUE 5.                         00160000
+                                                                        00170000
+       01 WS-RESP       PIC S9(8) COMP.                                 00180000
+                                                                        00190000
+       01 ACC-REC.                                                      00200000
+          05 A-ACCNO    PIC 9(5).                                       00210000
+          05 A-PIN      PIC 9(4).                                       00220000
+          05 EXTRA      PIC X(71).                                      00230000
+                                                                        00240000
+      *LINKAGE SECTION.                                                 00250000
+      * 01 WS-COMMAREA.                                                 00260000
+      *    05 W-ACCNO    PIC 9(5).                                      00270000
+      *    05 W-PIN      PIC 9(4).                                      00280000
+      LINKAGE SECTION.                                                  00290000
+      01 DFHCOMMAREA.                                                   00300000
+         05 CA-DATA       PIC X(10).                                    00310000
+         05 CA-ACCNO      PIC 9(5).                                     00320000
+       PROCEDURE DIVISION.                                              00330000
+      *----------------------------------------------------------*      00340000
+       MAIN-LOGIC.                                                      00350000
+                                                                        00360000
+           MOVE EIBAID TO WS-AID                                        00370000
+                                                                        00380000
+           IF EIBCALEN = 0                                              00390000
+              PERFORM FIRST-TIME                                        00400000
+           ELSE                                                         00410000
+      *       MOVE DFHCOMMAREA(1:5) TO WS-ACCNO                         00420000
+              PERFORM RECEIVE-SCREEN                                    00430000
+              PERFORM PROCESS-LOGIC                                     00440000
+           END-IF.                                                      00450000
+      *----------------------------------------------------------*      00460000
+       FIRST-TIME.                                                      00470000
+                                                                        00480000
+           MOVE LOW-VALUES TO MSPIO                                     00490000
+                                                                        00500000
+           EXEC CICS ASKTIME                                            00510000
+                ABSTIME(WS-ABSTIME)                                     00520000
+           END-EXEC                                                     00530000
+                                                                        00540000
+           EXEC CICS FORMATTIME                                         00550000
+                ABSTIME(WS-ABSTIME)                                     00560000
+                DDMMYY(WS-DATE)                                         00570000
+                DATESEP('/')                                            00580000
+           END-EXEC                                                     00590000
+                                                                        00600000
+           MOVE WS-DATE TO DATEO                                        00610000
+      *    MOVE 'SET YOUR PIN' TO MSGO                                  00620000
+                                                                        00630000
+           EXEC CICS SEND                                               00640000
+                MAP('MSPI')                                             00650000
+                MAPSET('MSPI')                                          00660000
+                FROM(MSPIO)                                             00670000
+                ERASE                                                   00680000
+                FREEKB                                                  00690000
+           END-EXEC                                                     00700000
+                                                                        00710000
+           EXEC CICS RETURN                                             00720000
+                TRANSID('TSPI')                                         00730000
+                COMMAREA(WS-COMMAREA)                                   00740000
+                LENGTH(9)                                               00750000
+           END-EXEC.                                                    00760000
+                                                                        00770000
+      *----------------------------------------------------------*      00780000
+       RECEIVE-SCREEN.                                                  00790000
+                                                                        00800000
+           EXEC CICS RECEIVE                                            00810000
+                MAP('MSPI')                                             00820000
+                MAPSET('MSPI')                                          00830000
+                INTO(MSPII)                                             00840000
+           END-EXEC                                                     00850000
+           MOVE ACCNOI TO WS-ACCNO                                      00860000
+           MOVE ENTPNI TO WS-PIN                                        00870000
+           MOVE CONPNI TO WS-CONPIN.                                    00880000
+                                                                        00890000
+      *----------------------------------------------------------*      00900000
+       PROCESS-LOGIC.                                                   00910000
+           EVALUATE WS-AID                                              00920000
+             WHEN DFHPF3                                                00930000
+                EXEC CICS RETURN                                        00940000
+                     TRANSID('TSPI')                                    00950000
+                     COMMAREA(WS-COMMAREA)                              00960000
+                     LENGTH(9)                                          00970000
+                END-EXEC                                                00980000
+             WHEN DFHENTER                                              00990000
+                PERFORM VALIDATE-PIN                                    01000000
+             WHEN OTHER                                                 01010000
+                PERFORM SEND-AGAIN                                      01020000
+           END-EVALUATE.                                                01030000
+      *----------------------------------------------------------*      01040000
+       VALIDATE-PIN.                                                    01050000
+           IF WS-PIN = SPACES OR WS-CONPIN = SPACES                     01060000
+              MOVE 'ENTER PIN' TO MSGO                                  01070000
+              PERFORM SEND-AGAIN                                        01080000
+           END-IF                                                       01090000
+                                                                        01100000
+           IF WS-PIN NOT = WS-CONPIN                                    01110000
+              MOVE 'PIN NOT MATCH' TO MSGO                              01120000
+              PERFORM SEND-AGAIN                                        01130000
+           END-IF                                                       01140000
+                                                                        01150000
+           IF WS-PIN IS NOT NUMERIC OR WS-CONPIN IS NOT NUMERIC         01160000
+              MOVE 'ENTER VALID PIN NUMBER' TO MSGO                     01170000
+              PERFORM SEND-AGAIN                                        01180000
+           END-IF                                                       01190000
+           PERFORM UPDATE-VSAM.                                         01200000
+      *----------------------------------------------------------*      01210000
+       UPDATE-VSAM.                                                     01220000
+                                                                        01230000
+           MOVE WS-ACCNO TO A-ACCNO                                     01240000
+                                                                        01250000
+           EXEC CICS READ                                               01260000
+                FILE('ACCFILE')                                         01270000
+                INTO(ACC-REC)                                           01280000
+                RIDFLD(A-ACCNO)                                         01290000
+                UPDATE                                                  01300000
+                RESP(WS-RESP)                                           01310000
+           END-EXEC                                                     01320000
+                                                                        01330000
+           IF WS-RESP NOT = DFHRESP(NORMAL)                             01340000
+              MOVE 'ACC ERROR' TO MSGO                                  01350000
+              PERFORM SEND-AGAIN                                        01360000
+           END-IF                                                       01370000
+                                                                        01380000
+           MOVE WS-PIN TO A-PIN                                         01390000
+                                                                        01400000
+           EXEC CICS REWRITE                                            01410000
+                FILE('ACCFILE')                                         01420000
+                FROM(ACC-REC)                                           01430000
+                LENGTH(LENGTH OF ACC-REC)                               01440000
+                RESP(WS-RESP)                                           01450000
+           END-EXEC                                                     01460000
+                                                                        01470000
+           IF WS-RESP = DFHRESP(NORMAL)                                 01480000
+              MOVE 'PIN SAVED' TO MSGO                                  01490000
+           ELSE                                                         01500000
+              MOVE 'SAVE ERROR' TO MSGO                                 01510000
+           END-IF                                                       01520000
+                                                                        01530000
+           PERFORM SEND-AGAIN.                                          01540000
+                                                                        01550000
+      *----------------------------------------------------------*      01560000
+       SEND-AGAIN.                                                      01570000
+                                                                        01580000
+           EXEC CICS ASKTIME                                            01590000
+                ABSTIME(WS-ABSTIME)                                     01600000
+           END-EXEC                                                     01610000
+                                                                        01620000
+           EXEC CICS FORMATTIME                                         01630000
+                ABSTIME(WS-ABSTIME)                                     01640000
+                DDMMYY(WS-DATE)                                         01650000
+                DATESEP('/')                                            01660000
+           END-EXEC                                                     01670000
+                                                                        01680000
+           MOVE WS-DATE TO DATEO                                        01690000
+                                                                        01700000
+           EXEC CICS SEND                                               01710000
+                MAP('MSPI')                                             01720000
+                MAPSET('MSPI')                                          01730000
+                FROM(MSPIO)                                             01740000
+                FREEKB                                                  01750000
+           END-EXEC                                                     01760000
+                                                                        01770000
+           EXEC CICS RETURN                                             01780000
+                TRANSID('TSPI')                                         01790000
+                COMMAREA(WS-COMMAREA)                                   01800000
+                LENGTH(9)                                               01810000
+           END-EXEC.                                                    01820000
+
